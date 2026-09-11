@@ -7,8 +7,9 @@ import { Events } from './Events.js';
 import { GameState, GameStates } from './GameState.js';
 import { World } from '../world/World.js';
 import { Player } from '../player/Player.js';
-import { Motorcycle } from '../motorcycle/Motorcycle.js';
+import { MotorcycleFactory } from '../motorcycle/MotorcycleFactory.js';
 import { ThirdPersonCamera } from '../camera/ThirdPersonCamera.js';
+import { HUD } from '../ui/HUD.js';
 
 // Orquestrador principal do jogo. Responsável por inicializar cada
 // sistema, correr o game loop e coordenar a ordem de actualização:
@@ -32,6 +33,7 @@ export class Game {
         this.player = null;
         this.motorcycle = null;
         this.thirdPersonCamera = null;
+        this.hud = null;
 
         this.isRunning = false;
         this.accumulator = 0;
@@ -46,11 +48,22 @@ export class Game {
         await this.setupPhysics();
 
         this.world = new World(this.scene, this.physicsWorld);
-        this.motorcycle = new Motorcycle(this.scene, this.physicsWorld, Constants.SPAWN.motorcycle);
+
+        const spawnPoint = this.world.getSpawnPoint();
+        this.motorcycle = MotorcycleFactory.createDefault(
+            this.scene,
+            this.physicsWorld,
+            this.world,
+            this.input,
+            this.events,
+            spawnPoint
+        );
+
         this.player = new Player(this.scene);
         this.player.enterMotorcycle(this.motorcycle);
 
         this.thirdPersonCamera = new ThirdPersonCamera(this.camera, Constants.CAMERA);
+        this.hud = new HUD(document.getElementById('hud'));
 
         window.addEventListener('resize', this.handleResize);
 
@@ -112,8 +125,9 @@ export class Game {
         let steps = 0;
 
         while (this.accumulator >= fixedTimeStep && steps < maxSubSteps) {
+            this.motorcycle.fixedUpdate(fixedTimeStep);
             this.physicsWorld.step();
-            this.motorcycle.syncPhysicsToVisual();
+            this.motorcycle.syncPhysicsToVisual(fixedTimeStep);
 
             this.accumulator -= fixedTimeStep;
             steps++;
@@ -125,6 +139,8 @@ export class Game {
 
         const cameraTarget = this.player.isOnMotorcycle() ? this.motorcycle.getMesh() : this.player.getMesh();
         this.thirdPersonCamera.update(cameraTarget, dt);
+
+        this.hud.update({ speedKmh: this.motorcycle.getSpeedKmh(), state: this.motorcycle.getState() });
 
         this.input.update();
     }
