@@ -4,23 +4,435 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Motorcycle Sandbox - Fase 1</title>
-    <link rel="stylesheet" href="style.css">
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        #game-container { width: 100vw; height: 100vh; display: block; }
+        #loading-screen {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: #1a1a1a; color: #fff; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 9999;
+            transition: opacity 0.5s ease;
+        }
+        #loading-text { margin-top: 20px; font-size: 1.2rem; color: #aaa; }
+        .spinner {
+            width: 40px; height: 40px; border: 4px solid #333;
+            border-top: 4px solid #fff; border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        #hud {
+            position: absolute; bottom: 20px; right: 20px;
+            background: rgba(0,0,0,0.7); color: #0f0;
+            padding: 15px; border-radius: 8px; font-family: 'Courier New', monospace;
+            font-weight: bold; font-size: 1.2rem; pointer-events: none;
+            display: none; border: 1px solid #333;
+        }
+        #controls-hint {
+            position: absolute; top: 20px; left: 20px;
+            background: rgba(0,0,0,0.7); color: #fff;
+            padding: 10px; border-radius: 5px; font-size: 0.9rem;
+            pointer-events: none; opacity: 0.8;
+        }
+    </style>
     
-    <!-- Import Map para carregar Three.js e Rapier sem bundler -->
+    <!-- Import Map Corrigido para CDN -->
     <script type="importmap">
     {
         "imports": {
             "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
             "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
-            "@dimforge/rapier3d-compat": "https://unpkg.com/@dimforge/rapier3d-compat@0.14.0/rapier3d-compat.module.js"
+            "rapier3d": "https://unpkg.com/@dimforge/rapier3d@0.14.0/rapier3d.wasm-compat.js"
         }
     }
     </script>
 </head>
 <body>
-    <div id="game-container"></div>
+    <div id="loading-screen">
+        <div class="spinner"></div>
+        <div id="loading-text">A carregar motor de física...</div>
+    </div>
     
-    <!-- O script deve ser tipo module -->
-    <script type="module" src="src/main.js"></script>
+    <div id="hud">
+        VEL: <span id="speed-value">0</span> km/h<br>
+        ESTADO: <span id="state-value">NORMAL</span>
+    </div>
+
+    <div id="controls-hint">
+        WASD / Setas: Conduzir<br>
+        ESPAÇO: Travão<br>
+        R: Resetar Mota
+    </div>
+
+    <div id="game-container"></div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import RAPIER from 'rapier3d';
+
+        // --- CONFIGURAÇÕES E CONSTANTES ---
+        const CONSTANTS = {
+            gravity: { x: 0, y: -9.81, z: 0 },
+            colors: {
+                sky: 0x87CEEB,
+                ground: 0x3a5f0b,
+                motorcycle: 0xff3333,
+                wheel: 0x111111
+            },
+            inputs: {
+                forward: ['KeyW', 'ArrowUp'],
+                backward: ['KeyS', 'ArrowDown'],
+                left: ['KeyA', 'ArrowLeft'],
+                right: ['KeyD', 'ArrowRight'],
+                brake: ['Space'],
+                respawn: ['KeyR']
+            }
+        };
+
+        // --- SISTEMA DE INPUT ---
+        class InputSystem {
+            constructor() {
+                this.keys = {};
+                window.addEventListener('keydown', (e) => this.keys[e.code] = true);
+                window.addEventListener('keyup', (e) => this.keys[e.code] = false);
+            }
+            isPressed(codes) {
+                if (Array.isArray(codes)) return codes.some(code => this.keys[code]);
+                return this.keys[codes];
+            }
+            getAxis(forwardCodes, backwardCodes) {
+                let value = 0;
+                if (this.isPressed(forwardCodes)) value += 1;
+                if (this.isPressed(backwardCodes)) value -= 1;
+                return value;
+            }
+        }
+
+        // --- FÍSICA DA MOTA (Lógica Simplificada Arcade) ---
+        class MotorcyclePhysics {
+            constructor(world, position, data) {
+                this.world = world;
+                this.data = data;
+                this.body = null;
+                this.wheelFront = null;
+                this.wheelRear = null;
+                this.createBody(position);
+            }
+
+            createBody(pos) {
+                // Corpo principal
+                const rbDesc = new RAPIER.RigidBodyDesc(RAPIER.RigidBodyType.Dynamic)
+                    .setTranslation(pos.x, pos.y, pos.z)
+                    .setMass(this.data.mass);
+                
+                this.body = this.world.createRigidBody(rbDesc);
+                
+                // Colisor do chassis (caixa simples)
+                const colliderDesc = new RAPIER.ColliderDesc(new RAPIER.Cuboid(0.3, 0.4, 0.8))
+                    .setDensity(1.0);
+                this.world.createCollider(colliderDesc, this.body);
+
+                // Raycasters para simular rodas (Arcade)
+                this.rayStart = new RAPIER.Vector3(0, 0.5, 0);
+                this.rayDir = new RAPIER.Vector3(0, -1, 0);
+            }
+
+            update(input, dt) {
+                if (!this.body) return;
+
+                const transform = this.body.translation();
+                const rotation = this.body.rotation();
+                
+                // Vetores de direção
+                const forwardVec = new THREE.Vector3(0, 0, 1).applyQuaternion(new THREE.Quaternion(rotation.w, rotation.x, rotation.y, rotation.z));
+                const rightVec = new THREE.Vector3(1, 0, 0).applyQuaternion(new THREE.Quaternion(rotation.w, rotation.x, rotation.y, rotation.z));
+                
+                // Estado no ar?
+                const rayHit = this.world.castRay(
+                    new RAPIER.Ray(this.rayStart.set(transform.x, transform.y + 0.5, transform.z), this.rayDir), 
+                    1.0, true
+                );
+                const isGrounded = rayHit && rayHit.toi < 0.9;
+
+                // Aceleração
+                let throttle = 0;
+                if (input.isPressed(CONSTANTS.inputs.forward)) throttle = 1;
+                else if (input.isPressed(CONSTANTS.inputs.backward)) throttle = -0.5;
+
+                if (throttle !== 0) {
+                    const force = forwardVec.multiplyScalar(throttle * this.data.acceleration * this.data.mass);
+                    // Aplicar força no centro de massa
+                    this.body.applyImpulse({ x: force.x, y: 0, z: force.z }, true);
+                }
+
+                // Direção (apenas se estiver no chão ou muito devagar)
+                let steer = 0;
+                if (input.isPressed(CONSTANTS.inputs.left)) steer = 1;
+                if (input.isPressed(CONSTANTS.inputs.right)) steer = -1;
+
+                if (steer !== 0) {
+                    // Curvar mais devagar em alta velocidade
+                    const speedFactor = Math.max(0.2, 1 - (forwardVec.length() / 30)); 
+                    const torque = rightVec.multiplyScalar(steer * this.data.steering * speedFactor);
+                    
+                    // Inclinação (Lean)
+                    const leanTorque = new THREE.Vector3(0, 0, -steer * this.data.leanAngle * speedFactor);
+                    
+                    this.body.applyTorqueImpulse({ x: leanTorque.x, y: 0, z: leanTorque.z }, true);
+                    this.body.applyTorqueImpulse({ x: torque.x, y: torque.y, z: torque.z }, true);
+                }
+
+                // Assistência de Equilíbrio (Self-balance)
+                if (isGrounded) {
+                    const upVec = new THREE.Vector3(0, 1, 0).applyQuaternion(new THREE.Quaternion(rotation.w, rotation.x, rotation.y, rotation.z));
+                    // Queremos que o Y local aponte para cima global (0,1,0)
+                    // Simplificação: aplicar torque para endireitar
+                    const currentUp = new THREE.Vector3(0, 1, 0).applyQuaternion(this.body.rotation());
+                    const error = new THREE.Vector3(0, 1, 0).cross(currentUp);
+                    
+                    const balanceTorque = error.multiplyScalar(this.data.balanceStrength);
+                    this.body.applyTorqueImpulse({ x: balanceTorque.x * dt, y: balanceTorque.y * dt, z: balanceTorque.z * dt }, true);
+                } else {
+                    // Controlo leve no ar
+                    if (input.isPressed(CONSTANTS.inputs.left) || input.isPressed(CONSTANTS.inputs.right)) {
+                         const airTorque = new THREE.Vector3(0, steer * 0.5, 0);
+                         this.body.applyTorqueImpulse({ x: airTorque.x, y: airTorque.y, z: airTorque.z }, true);
+                    }
+                }
+
+                // Travagem
+                if (input.isPressed(CONSTANTS.inputs.brake)) {
+                    const linVel = this.body.linvel();
+                    const drag = new RAPIER.Vector3(-linVel.x * 5.0, 0, -linVel.z * 5.0);
+                    this.body.applyImpulse(drag, true);
+                }
+            }
+        }
+
+        // --- DADOS DA MOTA ---
+        const bikeData = {
+            mass: 200,
+            acceleration: 15.0,
+            steering: 2.0,
+            balanceStrength: 15.0,
+            leanAngle: 1.5,
+            maxSpeed: 120
+        };
+
+        // --- JOGO PRINCIPAL ---
+        class Game {
+            constructor() {
+                this.container = document.getElementById('game-container');
+                this.loadingScreen = document.getElementById('loading-screen');
+                this.hud = document.getElementById('hud');
+                this.speedEl = document.getElementById('speed-value');
+                this.stateEl = document.getElementById('state-value');
+                
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color(CONSTANTS.colors.sky);
+                this.scene.fog = new THREE.Fog(CONSTANTS.colors.sky, 20, 100);
+
+                this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
+                this.renderer = new THREE.WebGLRenderer({ antialias: true });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.shadowMap.enabled = true;
+                this.container.appendChild(this.renderer.domElement);
+
+                this.input = new InputSystem();
+                this.clock = new THREE.Clock();
+                this.physicsWorld = null;
+                this.motorcycle = null;
+                this.motorcycleMesh = null;
+
+                this.initLights();
+                this.initWorld();
+                this.initPhysics();
+                
+                window.addEventListener('resize', () => this.onResize());
+                
+                // Iniciar loop após carregamento
+                this.animate();
+            }
+
+            initLights() {
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+                this.scene.add(ambientLight);
+
+                const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                dirLight.position.set(50, 100, 50);
+                dirLight.castShadow = true;
+                dirLight.shadow.camera.left = -50;
+                dirLight.shadow.camera.right = 50;
+                dirLight.shadow.camera.top = 50;
+                dirLight.shadow.camera.bottom = -50;
+                this.scene.add(dirLight);
+            }
+
+            initWorld() {
+                // Chão
+                const groundGeo = new THREE.PlaneGeometry(500, 500);
+                const groundMat = new THREE.MeshStandardMaterial({ color: CONSTANTS.colors.ground });
+                const ground = new THREE.Mesh(groundGeo, groundMat);
+                ground.rotation.x = -Math.PI / 2;
+                ground.receiveShadow = true;
+                this.scene.add(ground);
+
+                // Grid helper
+                const grid = new THREE.GridHelper(500, 50, 0x000000, 0x000000);
+                grid.material.opacity = 0.2;
+                grid.material.transparent = true;
+                this.scene.add(grid);
+
+                // Obstáculos aleatórios
+                for(let i=0; i<20; i++) {
+                    const h = Math.random() * 5 + 2;
+                    const geo = new THREE.BoxGeometry(4, h, 4);
+                    const mat = new THREE.MeshStandardMaterial({ color: 0x888888 });
+                    const mesh = new THREE.Mesh(geo, mat);
+                    mesh.position.set(
+                        (Math.random() - 0.5) * 200,
+                        h/2,
+                        (Math.random() - 0.5) * 200
+                    );
+                    mesh.castShadow = true;
+                    mesh.receiveShadow = true;
+                    this.scene.add(mesh);
+                }
+            }
+
+            async initPhysics() {
+                await RAPIER.init();
+                
+                const gravity = new RAPIER.Vector3(0, -9.81, 0);
+                this.physicsWorld = new RAPIER.World(gravity);
+
+                // Chão físico infinito (simples)
+                const groundDesc = new RAPIER.RigidBodyDesc(RAPIER.RigidBodyType.Fixed);
+                const groundBody = this.physicsWorld.createRigidBody(groundDesc);
+                const groundColl = new RAPIER.ColliderDesc(new RAPIER.Cuboid(250, 1, 250));
+                this.physicsWorld.createCollider(groundColl, groundBody);
+
+                this.createMotorcycle();
+                
+                // Esconder loading
+                this.loadingScreen.style.opacity = 0;
+                setTimeout(() => this.loadingScreen.style.display = 'none', 500);
+                this.hud.style.display = 'block';
+            }
+
+            createMotorcycle() {
+                // Física
+                this.motorcycle = new MotorcyclePhysics(this.physicsWorld, {x:0, y:5, z:0}, bikeData);
+
+                // Visual (Grupo)
+                this.motorcycleMesh = new THREE.Group();
+                
+                // Chassis
+                const chassisGeo = new THREE.BoxGeometry(0.6, 0.8, 1.8);
+                const chassisMat = new THREE.MeshStandardMaterial({ color: CONSTANTS.colors.motorcycle });
+                const chassis = new THREE.Mesh(chassisGeo, chassisMat);
+                chassis.position.y = 0.4;
+                chassis.castShadow = true;
+                this.motorcycleMesh.add(chassis);
+
+                // Rodas
+                const wheelGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.2, 16);
+                const wheelMat = new THREE.MeshStandardMaterial({ color: CONSTANTS.colors.wheel });
+                
+                const wheelF = new THREE.Mesh(wheelGeo, wheelMat);
+                wheelF.rotation.z = Math.PI / 2;
+                wheelF.position.set(0, 0.4, 0.9);
+                wheelF.castShadow = true;
+                this.motorcycleMesh.add(wheelF);
+
+                const wheelR = new THREE.Mesh(wheelGeo, wheelMat);
+                wheelR.rotation.z = Math.PI / 2;
+                wheelR.position.set(0, 0.4, -0.9);
+                wheelR.castShadow = true;
+                this.motorcycleMesh.add(wheelR);
+
+                this.scene.add(this.motorcycleMesh);
+            }
+
+            updatePhysics(dt) {
+                if (!this.motorcycle) return;
+
+                // Inputs
+                this.motorcycle.update(this.input, dt);
+
+                // Passo de física
+                this.physicsWorld.step();
+
+                // Sincronizar visual com física
+                const t = this.motorcycle.body.translation();
+                const r = this.motorcycle.body.rotation();
+                
+                this.motorcycleMesh.position.set(t.x, t.y, t.z);
+                this.motorcycleMesh.quaternion.set(r.w, r.x, r.y, r.z);
+
+                // Atualizar HUD
+                const vel = this.motorcycle.body.linvel();
+                const speed = Math.sqrt(vel.x*vel.x + vel.z*vel.z) * 3.6; // m/s -> km/h
+                this.speedEl.innerText = Math.round(speed);
+                
+                // Detetar queda (ângulo excessivo)
+                const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.motorcycleMesh.quaternion);
+                if (up.y < 0.5) {
+                    this.stateEl.innerText = "CRASHED";
+                    this.stateEl.style.color = "red";
+                    if (this.input.isPressed(CONSTANTS.inputs.respawn)) this.resetMotorcycle();
+                } else {
+                    this.stateEl.innerText = "NORMAL";
+                    this.stateEl.style.color = "#0f0";
+                }
+            }
+
+            resetMotorcycle() {
+                if (!this.motorcycle) return;
+                this.motorcycle.body.setTranslation({x: 0, y: 5, z: 0}, true);
+                this.motorcycle.body.setRotation({w:1, x:0, y:0, z:0}, true);
+                this.motorcycle.body.setLinvel({x:0, y:0, z:0}, true);
+                this.motorcycle.body.setAngvel({x:0, y:0, z:0}, true);
+            }
+
+            updateCamera() {
+                if (!this.motorcycleMesh) return;
+                
+                const targetPos = this.motorcycleMesh.position.clone();
+                const offset = new THREE.Vector3(0, 3, -6); // Atrás e acima
+                
+                // Offset relativo à rotação da mota
+                offset.applyQuaternion(this.motorcycleMesh.quaternion);
+                // Mas mantemos a altura relativa ao mundo para não bater no chão
+                offset.y = Math.max(offset.y, 2); 
+
+                const camPos = targetPos.clone().add(offset);
+                
+                this.camera.position.lerp(camPos, 0.1); // Suavização
+                this.camera.lookAt(targetPos.clone().add(new THREE.Vector3(0, 1, 0)));
+            }
+
+            onResize() {
+                this.camera.aspect = window.innerWidth / window.innerHeight;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+
+            animate() {
+                requestAnimationFrame(() => this.animate());
+                
+                const dt = Math.min(this.clock.getDelta(), 0.1);
+                
+                this.updatePhysics(dt);
+                this.updateCamera();
+                
+                this.renderer.render(this.scene, this.camera);
+            }
+        }
+
+        // Iniciar Jogo
+        window.onload = () => {
+            const game = new Game();
+        };
+    </script>
 </body>
 </html>
