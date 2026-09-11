@@ -1,241 +1,277 @@
 import * as THREE from 'three';
-import RAPIER from '@dimforge/rapier3d-compat';
-import { Constants } from './Constants.js';
-import { Input } from './Input.js';
-import { Time } from './Time.js';
-import { GameState } from './GameState.js';
-import { EventBus } from './Events.js';
+import RAPIER from 'rapier3d'; // O import map resolve isto para a URL correta
+import { Constants } from '../core/Constants.js';
+import { Time } from '../core/Time.js';
+import { Input } from '../core/Input.js';
+import { GameState } from '../core/GameState.js';
+import { Events } from '../core/Events.js';
 import { World } from '../world/World.js';
 import { Player } from '../player/Player.js';
 import { Motorcycle } from '../motorcycle/Motorcycle.js';
 import { ThirdPersonCamera } from '../camera/ThirdPersonCamera.js';
+import { HUD } from '../ui/HUD.js';
 
-let scene, camera, renderer;
-let world, physicsWorld;
-let player, motorcycle, thirdPersonCamera;
-let isInitialized = false;
-let animationId;
-
-// Variáveis para o loop de física fixo
-let lastTime = 0;
-let physicsAccumulator = 0;
-const fixedTimeStep = 1 / 60; // 60Hz para física
-
-export async function init() {
-    try {
-        // Inicializar Rapier
-        await RAPIER.init();
+export class Game {
+    constructor() {
+        this.container = null;
+        this.scene = null;
+        this.camera = null;
+        this.renderer = null;
         
-        // Remover ecrã de loading
-        const loadingScreen = document.getElementById('loading-screen');
-        if (loadingScreen) {
-            loadingScreen.classList.add('hidden');
-            setTimeout(() => loadingScreen.remove(), 500);
+        this.physicsWorld = null;
+        this.gravity = new RAPIER.Vector3(0, -9.81, 0);
+        
+        this.input = null;
+        this.time = null;
+        this.gameState = null;
+        this.events = null;
+        
+        this.world = null;
+        this.player = null;
+        this.motorcycle = null;
+        this.thirdPersonCamera = null;
+        this.hud = null;
+        
+        this.isInitialized = false;
+        this.isRunning = false;
+        
+        // Fixed timestep variables
+        this.fixedTimeStep = 1.0 / 60.0;
+        this.accumulator = 0;
+        this.maxSubSteps = 5; // Previne "spiral of death" se o frame demorar muito
+    }
+
+    async init() {
+        try {
+            // 1. Inicializar sistemas base
+            this.container = document.getElementById('game-container');
+            if (!this.container) {
+                throw new Error("Elemento #game-container não encontrado no HTML");
+            }
+
+            this.events = new Events();
+            this.time = new Time();
+            this.input = new Input();
+            this.gameState = new GameState();
+            this.hud = new HUD();
+
+            // 2. Configurar Three.js
+            this.setupThreeJS();
+
+            // 3. Configurar Rapier Physics (Assíncrono)
+            await this.setupPhysics();
+
+            // 4. Criar Objetos do Jogo
+            this.world = new World(this.scene, this.physicsWorld);
+            
+            // Criar Mota e Jogador
+            const spawnPoint = { x: 0, y: 5, z: 0 };
+            this.motorcycle = new Motorcycle(this.scene, this.physicsWorld, spawnPoint, this.events);
+            this.player = new Player(this.scene, this.physicsWorld, spawnPoint, this.events);
+            
+            // Montar o jogador na mota imediatamente
+            this.player.enterMotorcycle(this.motorcycle);
+
+            // 5. Configurar Câmara
+            this.thirdPersonCamera = new ThirdPersonCamera(
+                this.camera, 
+                this.motorcycle.getMesh(), 
+                Constants.CAMERA
+            );
+
+            // 6. Estado Inicial
+            this.gameState.setState('playing');
+            this.isInitialized = true;
+
+            // Emitir evento de jogo iniciado
+            this.events.emit('game.started');
+
+            console.log("Jogo inicializado com sucesso!");
+            
+            // Esconder loading screen se existir
+            const loadingScreen = document.getElementById('loading-screen');
+            if (loadingScreen) loadingScreen.style.display = 'none';
+
+        } catch (error) {
+            console.error("Erro crítico na inicialização:", error);
+            const loadingScreen = document.getElementById('loading-screen');
+            if (loadingScreen) {
+                loadingScreen.innerHTML = `<h1 style="color:red">Erro ao iniciar</h1><p>${error.message}</p>`;
+            }
+            throw error;
         }
+    }
 
-        // Criar cena Three.js
-        scene = new THREE.Scene();
-        scene.background = new THREE.Color(Constants.SKY_COLOR);
-        scene.fog = new THREE.Fog(Constants.SKY_COLOR, Constants.FOG_NEAR, Constants.FOG_FAR);
-
-        // Criar câmara
-        camera = new THREE.PerspectiveCamera(
-            Constants.CAMERA_FOV,
-            window.innerWidth / window.innerHeight,
-            Constants.CAMERA_NEAR,
-            Constants.CAMERA_FAR
+    setupThreeJS() {
+        // Cena
+        this.scene = new THREE.Scene();
+        this.scene.background = new THREE.Color(Constants.WORLD.skyColor);
+        this.scene.fog = new THREE.Fog(
+            Constants.WORLD.skyColor, 
+            Constants.WORLD.fogNear, 
+            Constants.WORLD.fogFar
         );
-        camera.position.set(0, 5, -10);
 
-        // Criar renderer
-        renderer = new THREE.WebGLRenderer({ 
-            antialias: true,
+        // Câmera
+        this.camera = new THREE.PerspectiveCamera(
+            Constants.CAMERA.fov,
+            window.innerWidth / window.innerHeight,
+            Constants.CAMERA.near,
+            Constants.CAMERA.far
+        );
+        this.camera.position.set(0, 5, -10);
+
+        // Renderer
+        this.renderer = new THREE.WebGLRenderer({ 
+            antialias: Constants.RENDER.antialias,
             powerPreference: "high-performance"
         });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-        renderer.shadowMap.enabled = true;
-        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-        document.getElementById('game-container').appendChild(renderer.domElement);
-
-        // Criar iluminação
-        setupLighting();
-
-        // Inicializar mundo físico
-        const gravity = { x: 0, y: -9.81, z: 0 };
-        physicsWorld = new RAPIER.World(gravity);
-
-        // Inicializar sistemas
-        Input.init();
-        GameState.setState('playing');
-
-        // Criar mundo do jogo
-        world = new World(scene, physicsWorld);
-
-        // Criar jogador e mota
-        player = new Player(scene, physicsWorld, Constants.INITIAL_PLAYER_POS);
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        this.renderer.shadowMap.enabled = Constants.RENDER.shadows;
+        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         
-        // Criar mota e associar ao jogador
-        const motorcycleData = {
-            name: "Starter Bike",
-            mass: 200,
-            maxSpeed: 180,
-            acceleration: 80,
-            braking: 150,
-            steering: 2.5,
-            grip: 10,
-            offroadGrip: 5,
-            airControl: 0.5,
-            leanAngle: 0.8,
-            suspensionStrength: 35,
-            suspensionDamping: 5
-        };
-        
-        motorcycle = new Motorcycle(scene, physicsWorld, Constants.INITIAL_MOTORCYCLE_POS, motorcycleData);
-        player.mountMotorcycle(motorcycle);
+        this.container.appendChild(this.renderer.domElement);
 
-        // Configurar câmara para seguir a mota
-        thirdPersonCamera = new ThirdPersonCamera(camera, motorcycle.mesh, {
-            distance: Constants.CAMERA_DISTANCE,
-            height: Constants.CAMERA_HEIGHT,
-            smoothing: Constants.CAMERA_SMOOTHING
-        });
+        // Iluminação
+        this.setupLights();
 
         // Event Listeners
-        window.addEventListener('resize', onWindowResize);
+        window.addEventListener('resize', () => this.onWindowResize(), false);
+    }
+
+    setupLights() {
+        // Luz Ambiente
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        this.scene.add(ambientLight);
+
+        // Luz Direcional (Sol)
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(50, 100, 50);
+        dirLight.castShadow = Constants.RENDER.shadows;
         
-        isInitialized = true;
-        lastTime = performance.now();
+        if (Constants.RENDER.shadows) {
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            dirLight.shadow.camera.near = 0.5;
+            dirLight.shadow.camera.far = 500;
+            dirLight.shadow.camera.left = -50;
+            dirLight.shadow.camera.right = 50;
+            dirLight.shadow.camera.top = 50;
+            dirLight.shadow.camera.bottom = -50;
+        }
         
-        // Iniciar loop
-        requestAnimationFrame(gameLoop);
+        this.scene.add(dirLight);
+    }
+
+    async setupPhysics() {
+        // Inicializar o motor de física
+        await RAPIER.init();
         
-        console.log("Jogo inicializado com sucesso!");
+        this.physicsWorld = new RAPIER.World(this.gravity);
+        this.physicsWorld.timestep = this.fixedTimeStep;
         
-    } catch (error) {
-        console.error("Erro ao inicializar o jogo:", error);
-        const loadingText = document.getElementById('loading-text');
-        if (loadingText) {
-            loadingText.textContent = "Erro ao carregar: " + error.message;
-            loadingText.style.color = "#ff4444";
+        console.log("Física Rapier inicializada.");
+    }
+
+    start() {
+        if (!this.isInitialized) {
+            console.warn("Tentativa de iniciar jogo antes da inicialização completa.");
+            return;
+        }
+        this.isRunning = true;
+        this.time.start();
+        requestAnimationFrame(() => this.loop());
+    }
+
+    loop() {
+        if (!this.isRunning) return;
+
+        requestAnimationFrame(() => this.loop());
+
+        // Atualizar Delta Time
+        this.time.update();
+        const delta = this.time.delta;
+
+        // Acumulador para Fixed Timestep na física
+        this.accumulator += delta;
+        
+        // Limitar o número de passos de física para evitar lag espiral
+        let steps = 0;
+        while (this.accumulator >= this.fixedTimeStep && steps < this.maxSubSteps) {
+            this.updatePhysics(this.fixedTimeStep);
+            this.accumulator -= this.fixedTimeStep;
+            steps++;
+        }
+
+        // Interpolação simples (opcional, aqui usamos o estado mais recente para simplicidade)
+        // Se quisesse interpolação perfeita, renderizaríamos entre o estado anterior e atual
+        
+        this.updateLogic(delta);
+        this.render();
+    }
+
+    updatePhysics(dt) {
+        if (!this.physicsWorld) return;
+
+        // Passo de simulação física
+        this.physicsWorld.step();
+
+        // Sincronizar objetos físicos com visuais
+        if (this.motorcycle) this.motorcycle.syncPhysicsToVisual();
+        if (this.player) this.player.syncPhysicsToVisual();
+        // Nota: O World poderia ter objetos dinâmicos também, mas por enquanto só o chão (estático)
+    }
+
+    updateLogic(dt) {
+        if (this.gameState.currentState !== 'playing') return;
+
+        // Atualizar Inputs
+        this.input.update();
+
+        // Atualizar Lógica dos Objetos
+        if (this.motorcycle) {
+            this.motorcycle.update(dt, this.input);
+        }
+
+        if (this.player) {
+            this.player.update(dt, this.input);
+        }
+
+        // Atualizar Câmara
+        if (this.thirdPersonCamera && this.motorcycle) {
+            // A câmara segue a mota se o jogador estiver montado
+            const target = this.player.isOnMotorcycle ? this.motorcycle.getMesh() : this.player.getMesh();
+            this.thirdPersonCamera.update(target, dt);
+        }
+
+        // Atualizar HUD
+        if (this.hud && this.motorcycle) {
+            this.hud.update({
+                speed: this.motorcycle.getCurrentSpeed(),
+                gear: this.motorcycle.getCurrentGear(), // Opcional
+                state: this.motorcycle.getState()
+            });
         }
     }
-}
 
-function setupLighting() {
-    // Luz ambiente
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-    scene.add(ambientLight);
-
-    // Luz direcional (Sol)
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    dirLight.position.set(50, 100, 50);
-    dirLight.castShadow = true;
-    dirLight.shadow.mapSize.width = 2048;
-    dirLight.shadow.mapSize.height = 2048;
-    dirLight.shadow.camera.near = 0.5;
-    dirLight.shadow.camera.far = 500;
-    dirLight.shadow.camera.left = -100;
-    dirLight.shadow.camera.right = 100;
-    dirLight.shadow.camera.top = 100;
-    dirLight.shadow.camera.bottom = -100;
-    scene.add(dirLight);
-}
-
-function onWindowResize() {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-}
-
-function gameLoop(currentTime) {
-    if (!isInitialized) return;
-
-    animationId = requestAnimationFrame(gameLoop);
-
-    const deltaTime = (currentTime - lastTime) / 1000;
-    lastTime = currentTime;
-
-    // Limitar deltaTime para evitar saltos grandes
-    const safeDelta = Math.min(deltaTime, 0.1);
-
-    // Acumular tempo para física fixa
-    physicsAccumulator += safeDelta;
-
-    // Atualizar inputs
-    Input.update();
-
-    // Atualizar lógica do jogo (variável)
-    update(safeDelta);
-
-    // Atualizar física (passo fixo)
-    while (physicsAccumulator >= fixedTimeStep) {
-        updatePhysics(fixedTimeStep);
-        physicsAccumulator -= fixedTimeStep;
+    render() {
+        if (!this.renderer || !this.scene || !this.camera) return;
+        this.renderer.render(this.scene, this.camera);
     }
 
-    // Renderizar
-    render();
-}
+    onWindowResize() {
+        if (!this.camera || !this.renderer) return;
 
-function update(deltaTime) {
-    // Atualizar estados
-    GameState.update(deltaTime);
-    
-    // Atualizar jogador
-    if (player) player.update(deltaTime);
-    
-    // Atualizar mota
-    if (motorcycle) motorcycle.update(deltaTime);
-    
-    // Atualizar câmara
-    if (thirdPersonCamera && motorcycle) {
-        thirdPersonCamera.update(deltaTime);
+        this.camera.aspect = window.innerWidth / window.innerHeight;
+        this.camera.updateProjectionMatrix();
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
     }
-    
-    // Atualizar HUD
-    updateHUD();
-}
 
-function updatePhysics(deltaTime) {
-    if (physicsWorld) {
-        physicsWorld.step();
-    }
-    
-    // Sincronizar objetos físicos com visuais após o step
-    if (motorcycle) motorcycle.syncPhysicsToVisuals();
-    if (player) player.syncPhysicsToVisuals();
-}
-
-function render() {
-    if (renderer && scene && camera) {
-        renderer.render(scene, camera);
-    }
-}
-
-function updateHUD() {
-    if (!motorcycle) return;
-    
-    const speedElement = document.getElementById('speed-value');
-    const stateElement = document.getElementById('state-value');
-    
-    if (speedElement) {
-        // Converter m/s para km/h aproximado
-        const speedKmh = Math.abs(motorcycle.getSpeed() * 3.6).toFixed(0);
-        speedElement.textContent = speedKmh;
-    }
-    
-    if (stateElement) {
-        stateElement.textContent = motorcycle.getState();
-    }
-}
-
-export function stop() {
-    isInitialized = false;
-    if (animationId) {
-        cancelAnimationFrame(animationId);
-    }
-    if (renderer) {
-        renderer.dispose();
+    stop() {
+        this.isRunning = false;
+        if (this.physicsWorld) {
+            // Limpeza se necessário
+        }
     }
 }
