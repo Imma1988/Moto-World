@@ -3,7 +3,7 @@
  */
 
 import * as THREE from 'three';
-import RAPIER from 'rapier3d-compat';
+import RAPIER from '@dimforge/rapier3d';
 
 import { Constants } from './Constants.js';
 import { Time } from './Time.js';

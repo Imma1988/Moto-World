@@ -4,7 +4,7 @@
  */
 
 import * as THREE from 'three';
-import RAPIER from 'rapier3d-compat';
+import RAPIER from '@dimforge/rapier3d';
 import { MotorcycleData } from './MotorcycleData.js';
 import { MathUtils } from '../utils/MathUtils.js';
 
