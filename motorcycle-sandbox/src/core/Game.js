@@ -1,5 +1,5 @@
 /**
- * Game - Classe principal que gere o ciclo de vida do jogo
+ * Game - Classe principal que gere o ciclo de vida do jogo (FASE 1)
  */
 
 import * as THREE from 'three';
@@ -15,6 +15,7 @@ import { World } from '../world/World.js';
 import { Player } from '../player/Player.js';
 import { Motorcycle } from '../motorcycle/Motorcycle.js';
 import { ThirdPersonCamera } from '../camera/ThirdPersonCamera.js';
+import { HUD } from '../ui/HUD.js';
 
 export class Game {
     constructor() {
@@ -36,6 +37,7 @@ export class Game {
         this.player = null;
         this.motorcycle = null;
         this.gameCamera = null;
+        this.hud = null;
 
         // Estado do loop
         this.isRunning = false;
@@ -156,13 +158,13 @@ export class Game {
         this.world = new World(this.scene, this.physicsWorld);
         this.world.create();
 
-        // Jogador
+        // Jogador (posicionado perto da mota)
         this.player = new Player(this.scene, this.physicsWorld);
-        this.player.create();
+        this.player.create(new THREE.Vector3(2, 1, 0));
 
-        // Motociclo
-        this.motorcycle = new Motorcycle(this.scene, this.physicsWorld);
-        this.motorcycle.create();
+        // Motociclo (posição inicial)
+        const motorcycleStartPos = new THREE.Vector3(0, 2, 0);
+        this.motorcycle = new Motorcycle(this.scene, this.physicsWorld, this.input, motorcycleStartPos);
 
         // Câmara third-person
         this.gameCamera = new ThirdPersonCamera(
@@ -172,6 +174,9 @@ export class Game {
             Constants.Camera.DEFAULT_HEIGHT,
             Constants.Camera.SMOOTHING
         );
+
+        // HUD
+        this.hud = new HUD();
     }
 
     /**
@@ -253,15 +258,29 @@ export class Game {
         this.player.update(delta, this.input);
 
         // Atualizar motociclo
-        this.motorcycle.update(delta, this.input);
+        this.motorcycle.update(delta);
 
         // Atualizar câmara para seguir a mota
         this.gameCamera.update(delta);
 
-        // Verificar reset
-        if (this.input.isActionPressed('reset')) {
-            this.reset();
-        }
+        // Atualizar HUD com dados da mota
+        this.updateHUD();
+
+        // Verificar respawn manual (tecla R)
+        // (já tratado no MotorcycleController)
+    }
+
+    /**
+     * Atualizar HUD com informações da mota
+     */
+    updateHUD() {
+        if (!this.hud || !this.motorcycle) return;
+
+        const speed = this.motorcycle.getSpeed();
+        const state = this.motorcycle.getState();
+
+        this.hud.updateSpeed(speed);
+        this.hud.updateState(state);
     }
 
     /**
@@ -290,7 +309,7 @@ export class Game {
         // Sincronizar objetos físicos com visuais
         this.world.syncPhysicsObjects();
         this.player.syncPhysicsObject();
-        this.motorcycle.syncPhysicsObjects();
+        // Motorcycle sincroniza internamente no seu update()
     }
 
     /**
@@ -308,7 +327,7 @@ export class Game {
         events.emit('game.reset');
 
         // Resetar motociclo
-        this.motorcycle.reset();
+        this.motorcycle.requestRespawn();
 
         // Resetar player
         this.player.reset();
@@ -324,6 +343,45 @@ export class Game {
             fps: this.time.getFPS(),
             deltaTime: this.time.getDelta()
         };
+    }
+
+    /**
+     * Limpar recursos
+     */
+    dispose() {
+        this.stop();
+
+        if (this.hud) {
+            this.hud.destroy();
+            this.hud = null;
+        }
+
+        if (this.motorcycle) {
+            this.motorcycle.dispose();
+            this.motorcycle = null;
+        }
+
+        if (this.player) {
+            this.player.dispose();
+            this.player = null;
+        }
+
+        if (this.world) {
+            this.world.dispose();
+            this.world = null;
+        }
+
+        if (this.renderer) {
+            this.renderer.dispose();
+            if (this.renderer.domElement && this.renderer.domElement.parentNode) {
+                this.renderer.domElement.parentNode.removeChild(this.renderer.domElement);
+            }
+            this.renderer = null;
+        }
+
+        this.physicsWorld = null;
+        this.scene = null;
+        this.camera = null;
     }
 }
 

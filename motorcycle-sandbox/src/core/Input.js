@@ -13,28 +13,28 @@ export class Input {
         // Mapeamento de ações para teclas (pode ser reconfigurado)
         this.bindings = {
             accelerate: [...Constants.Input.ACCELERATE],
-            brake: [...Constants.Input.BRAKE],
-            left: [...Constants.Input.LEFT],
-            right: [...Constants.Input.RIGHT],
+            brake_reverse: [...Constants.Input.BRAKE_REVERSE],  // S / ArrowDown
+            turnLeft: [...Constants.Input.TURN_LEFT],
+            turnRight: [...Constants.Input.TURN_RIGHT],
             handbrake: [...Constants.Input.HANDBRAKE],
             interact: [...Constants.Input.INTERACT],
-            reset: [...Constants.Input.RESET]
+            respawn: [...Constants.Input.RESPAWN]
         };
 
         // Estado das ações
         this.actions = {
             accelerate: false,
-            brake: false,
-            left: false,
-            right: false,
+            brake_reverse: false,
+            turnLeft: false,
+            turnRight: false,
             handbrake: false,
             interact: false,
-            reset: false
+            respawn: false
         };
 
         // Valores analógicos (para suporte futuro a gamepads)
         this.values = {
-            throttle: 0,  // 0 a 1
+            throttle: 0,  // -1 a 1 (positivo=frente, negativo=reverso)
             brake: 0,     // 0 a 1
             steer: 0      // -1 a 1
         };
@@ -99,22 +99,32 @@ export class Input {
     updateActions() {
         // Ações booleanas
         this.actions.accelerate = this.isAnyPressed(this.bindings.accelerate);
-        this.actions.brake = this.isAnyPressed(this.bindings.brake);
-        this.actions.left = this.isAnyPressed(this.bindings.left);
-        this.actions.right = this.isAnyPressed(this.bindings.right);
+        this.actions.brake_reverse = this.isAnyPressed(this.bindings.brake_reverse);
+        this.actions.turnLeft = this.isAnyPressed(this.bindings.turnLeft);
+        this.actions.turnRight = this.isAnyPressed(this.bindings.turnRight);
         this.actions.handbrake = this.isAnyPressed(this.bindings.handbrake);
         this.actions.interact = this.isAnyPressed(this.bindings.interact);
-        this.actions.reset = this.isAnyPressed(this.bindings.reset);
+        this.actions.respawn = this.isAnyPressed(this.bindings.respawn);
 
         // Valores analógicos (teclado = digital, mas preparado para gamepad)
-        this.values.throttle = this.actions.accelerate ? 1 : 0;
-        this.values.brake = this.actions.brake ? 1 : 0;
+        // Throttle: W = 1, S = -0.5 (reverso mais lento), nada = 0
+        if (this.actions.accelerate) {
+            this.values.throttle = 1;
+        } else if (this.actions.brake_reverse) {
+            this.values.throttle = -0.5;  // Marcha-atrás
+        } else {
+            this.values.throttle = 0;
+        }
         
-        if (this.actions.left && this.actions.right) {
+        // Travão (independente do reverso)
+        this.values.brake = this.actions.brake_reverse && !this.actions.accelerate ? 1 : 0;
+        
+        // Direção
+        if (this.actions.turnLeft && this.actions.turnRight) {
             this.values.steer = 0;
-        } else if (this.actions.left) {
+        } else if (this.actions.turnLeft) {
             this.values.steer = -1;
-        } else if (this.actions.right) {
+        } else if (this.actions.turnRight) {
             this.values.steer = 1;
         } else {
             this.values.steer = 0;

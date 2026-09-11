@@ -1,215 +1,408 @@
 /**
- * Motorcycle - Representação da mota
- * Nota: Física detalhada será implementada na FASE 1
- * Esta classe prepara a arquitetura para receber MotorcyclePhysics, MotorcycleController, etc.
+ * Motorcycle - Representação da mota com física arcade completa (FASE 1)
+ * Integra MotorcyclePhysics, MotorcycleController e modelo visual procedural
  */
 
 import * as THREE from 'three';
 import RAPIER from 'rapier3d-compat';
 
 import { events } from '../core/Events.js';
+import { MotorcycleData } from './MotorcycleData.js';
+import { MotorcyclePhysics } from './MotorcyclePhysics.js';
+import { MotorcycleController } from './MotorcycleController.js';
+import { MathUtils } from '../utils/MathUtils.js';
 
 export class Motorcycle {
-    constructor(scene, physicsWorld) {
+    constructor(scene, physicsWorld, inputSystem, startPosition = null) {
         this.scene = scene;
         this.physicsWorld = physicsWorld;
-
+        this.input = inputSystem;
+        
+        // Dados da mota
+        this.data = MotorcycleData;
+        
         // Estado da mota
-        this.speed = 0;
-        this.maxSpeed = 50;
-        this.acceleration = 10;
-        this.brakeForce = 15;
-        this.turnSpeed = 2;
-
+        this.state = 'NORMAL';  // NORMAL, AIRBORNE, CRASHED, RESPAWNING
+        this.respawnTimer = 0;
+        this.lastCrashTime = 0;
+        
         // Visual (grupo de meshes)
         this.mesh = null;
         this.bodyMesh = null;
+        this.tankMesh = null;
+        this.seatMesh = null;
         this.frontWheel = null;
         this.rearWheel = null;
-
-        // Física
-        this.body = null;
-        this.colliders = [];
-
-        // Componentes futuros (preparar arquitetura)
-        // - MotorcyclePhysics (FASE 1)
-        // - MotorcycleController (FASE 1)
-        // - MotorcycleAudio (FASE 11)
-        // - MotorcycleEffects (futuro)
+        this.handlebarMesh = null;
+        this.forkFront = null;
+        this.forkRear = null;
+        this.exhaustMesh = null;
+        this.headlightMesh = null;
         
+        // Componentes
         this.physicsComponent = null;
         this.controllerComponent = null;
-        this.audioComponent = null;
+        
+        // Criar a mota
+        const pos = startPosition || new THREE.Vector3(0, 2, 0);
+        this.create(pos);
     }
 
     /**
-     * Criar a mota
+     * Criar a mota completa
      */
-    create() {
-        console.log('Motorcycle: Creating...');
+    create(startPosition) {
+        console.log('Motorcycle: Creating at', startPosition);
 
         this.createVisual();
-        this.createPhysics();
+        this.createPhysics(startPosition);
+        this.createController();
 
         console.log('Motorcycle: Creation complete');
-        events.emit('motorcycle.created');
+        events.emit('motorcycle.created', { motorcycle: this });
     }
 
     /**
-     * Criar representação visual procedural
+     * Criar representação visual procedural detalhada
      */
     createVisual() {
         this.mesh = new THREE.Group();
 
-        // Corpo principal da mota
-        const bodyGeometry = new THREE.BoxGeometry(0.8, 0.4, 1.5);
+        const colors = this.data.colors;
+
+        // === CORPO PRINCIPAL (Chassis) ===
+        const bodyGeometry = new THREE.BoxGeometry(
+            this.data.width * 0.7,
+            this.data.height * 0.35,
+            this.data.length * 0.45
+        );
         const bodyMaterial = new THREE.MeshStandardMaterial({ 
-            color: 0xe74c3c,
+            color: colors.body,
             roughness: 0.3,
             metalness: 0.6
         });
         this.bodyMesh = new THREE.Mesh(bodyGeometry, bodyMaterial);
-        this.bodyMesh.position.y = 0.6;
+        this.bodyMesh.position.y = this.data.centerOfMassY;
         this.bodyMesh.castShadow = true;
+        this.bodyMesh.receiveShadow = true;
         this.mesh.add(this.bodyMesh);
 
-        // Roda dianteira
-        const wheelGeometry = new THREE.CylinderGeometry(0.3, 0.3, 0.15, 16);
+        // === DEPÓSITO DE COMBUSTÍVEL ===
+        const tankGeometry = new THREE.CylinderGeometry(0.12, 0.15, 0.35, 8);
+        const tankMaterial = new THREE.MeshStandardMaterial({ 
+            color: colors.tank,
+            roughness: 0.2,
+            metalness: 0.8
+        });
+        this.tankMesh = new THREE.Mesh(tankGeometry, tankMaterial);
+        this.tankMesh.rotation.x = Math.PI / 2;
+        this.tankMesh.position.set(0, this.data.centerOfMassY + 0.25, 0.1);
+        this.tankMesh.castShadow = true;
+        this.mesh.add(this.tankMesh);
+
+        // === ASSENTO ===
+        const seatGeometry = new THREE.BoxGeometry(
+            this.data.width * 0.6,
+            0.08,
+            this.data.length * 0.35
+        );
+        const seatMaterial = new THREE.MeshStandardMaterial({ 
+            color: colors.seat,
+            roughness: 0.9,
+            metalness: 0.1
+        });
+        this.seatMesh = new THREE.Mesh(seatGeometry, seatMaterial);
+        this.seatMesh.position.set(0, this.data.centerOfMassY + 0.12, -0.25);
+        this.seatMesh.castShadow = true;
+        this.mesh.add(this.seatMesh);
+
+        // === RODAS ===
+        const wheelGeometry = new THREE.TorusGeometry(
+            this.data.wheelRadius,
+            0.08,
+            8,
+            24
+        );
         const wheelMaterial = new THREE.MeshStandardMaterial({ 
-            color: 0x333333,
-            roughness: 0.8
+            color: colors.wheels,
+            roughness: 0.7,
+            metalness: 0.5
         });
 
+        // Roda dianteira
         this.frontWheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
-        this.frontWheel.rotation.z = Math.PI / 2;
-        this.frontWheel.position.set(0, 0.3, 0.9);
+        this.frontWheel.rotation.y = Math.PI / 2;
+        this.frontWheel.position.set(0, this.data.wheelRadius, this.data.wheelbase / 2);
         this.frontWheel.castShadow = true;
         this.mesh.add(this.frontWheel);
 
         // Roda traseira
         this.rearWheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
-        this.rearWheel.rotation.z = Math.PI / 2;
-        this.rearWheel.position.set(0, 0.3, -0.9);
+        this.rearWheel.rotation.y = Math.PI / 2;
+        this.rearWheel.position.set(0, this.data.wheelRadius, -this.data.wheelbase / 2);
         this.rearWheel.castShadow = true;
         this.mesh.add(this.rearWheel);
 
-        // Guidão
-        const handlebarGeometry = new THREE.CylinderGeometry(0.03, 0.03, 0.6, 8);
-        const handlebarMaterial = new THREE.MeshStandardMaterial({ 
-            color: 0x888888,
-            roughness: 0.4,
-            metalness: 0.8
+        // Pneus (detalhe visual)
+        const tireGeometry = new THREE.TorusGeometry(
+            this.data.wheelRadius,
+            0.12,
+            6,
+            20
+        );
+        const tireMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0x1a1a1a,
+            roughness: 0.95
         });
-        const handlebar = new THREE.Mesh(handlebarGeometry, handlebarMaterial);
-        handlebar.rotation.x = Math.PI / 2;
-        handlebar.position.set(0, 0.9, 0.5);
-        handlebar.castShadow = true;
-        this.mesh.add(handlebar);
 
-        // Posição inicial
-        this.mesh.position.set(0, 0.5, 0);
+        const frontTire = new THREE.Mesh(tireGeometry, tireMaterial);
+        frontTire.rotation.y = Math.PI / 2;
+        frontTire.position.copy(this.frontWheel.position);
+        this.mesh.add(frontTire);
+
+        const rearTire = new THREE.Mesh(tireGeometry, tireMaterial);
+        rearTire.rotation.y = Math.PI / 2;
+        rearTire.position.copy(this.rearWheel.position);
+        this.mesh.add(rearTire);
+
+        // === GARFOS DA SUSPENSÃO (Dianteiro) ===
+        const forkGeometry = new THREE.CylinderGeometry(0.025, 0.025, 0.5, 8);
+        const forkMaterial = new THREE.MeshStandardMaterial({ 
+            color: colors.forks,
+            roughness: 0.2,
+            metalness: 0.9
+        });
+
+        this.forkFront = new THREE.Mesh(forkGeometry, forkMaterial);
+        this.forkFront.position.set(-this.data.width * 0.35, 0.4, this.data.wheelbase / 2);
+        this.forkFront.castShadow = true;
+        this.mesh.add(this.forkFront);
+
+        const forkFrontRight = new THREE.Mesh(forkGeometry, forkMaterial);
+        forkFrontRight.position.set(this.data.width * 0.35, 0.4, this.data.wheelbase / 2);
+        forkFrontRight.castShadow = true;
+        this.mesh.add(forkFrontRight);
+
+        // === AMORTECEDOR TRASEIRO ===
+        this.forkRear = new THREE.Mesh(forkGeometry, forkMaterial);
+        this.forkRear.position.set(0, 0.35, -this.data.wheelbase / 2 - 0.1);
+        this.forkRear.castShadow = true;
+        this.mesh.add(this.forkRear);
+
+        // === GUIDÃO ===
+        const handlebarGeometry = new THREE.CylinderGeometry(0.02, 0.02, this.data.width * 0.9, 8);
+        const handlebarMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0x333333,
+            roughness: 0.5,
+            metalness: 0.7
+        });
+        this.handlebarMesh = new THREE.Mesh(handlebarGeometry, handlebarMaterial);
+        this.handlebarMesh.rotation.x = Math.PI / 2;
+        this.handlebarMesh.position.set(0, this.data.height * 0.75, this.data.wheelbase / 2 - 0.15);
+        this.handlebarMesh.castShadow = true;
+        this.mesh.add(this.handlebarMesh);
+
+        // Manetes do guidão
+        const leverGeometry = new THREE.CylinderGeometry(0.015, 0.015, 0.12, 6);
+        const leftLever = new THREE.Mesh(leverGeometry, handlebarMaterial);
+        leftLever.rotation.z = Math.PI / 2;
+        leftLever.position.set(-this.data.width * 0.35, this.data.height * 0.75, this.data.wheelbase / 2 - 0.15);
+        this.mesh.add(leftLever);
+
+        const rightLever = new THREE.Mesh(leverGeometry, handlebarMaterial);
+        rightLever.rotation.z = Math.PI / 2;
+        rightLever.position.set(this.data.width * 0.35, this.data.height * 0.75, this.data.wheelbase / 2 - 0.15);
+        this.mesh.add(rightLever);
+
+        // === MOTOR ===
+        const engineGeometry = new THREE.BoxGeometry(
+            this.data.width * 0.5,
+            this.data.height * 0.25,
+            this.data.length * 0.25
+        );
+        const engineMaterial = new THREE.MeshStandardMaterial({ 
+            color: colors.engine,
+            roughness: 0.4,
+            metalness: 0.85
+        });
+        const engineMesh = new THREE.Mesh(engineGeometry, engineMaterial);
+        engineMesh.position.set(0, 0.25, 0);
+        engineMesh.castShadow = true;
+        this.mesh.add(engineMesh);
+
+        // === ESCAPE ===
+        const exhaustGeometry = new THREE.CylinderGeometry(0.04, 0.06, 0.5, 8);
+        const exhaustMaterial = new THREE.MeshStandardMaterial({ 
+            color: colors.exhaust,
+            roughness: 0.3,
+            metalness: 0.9
+        });
+        this.exhaustMesh = new THREE.Mesh(exhaustGeometry, exhaustMaterial);
+        this.exhaustMesh.rotation.x = Math.PI / 2;
+        this.exhaustMesh.position.set(this.data.width * 0.35, 0.2, -this.data.wheelbase / 2 + 0.2);
+        this.exhaustMesh.castShadow = true;
+        this.mesh.add(this.exhaustMesh);
+
+        // === FAROL DIANTEIRO ===
+        const headlightGeometry = new THREE.SphereGeometry(0.08, 8, 8);
+        const headlightMaterial = new THREE.MeshStandardMaterial({ 
+            color: colors.headlight,
+            emissive: colors.headlight,
+            emissiveIntensity: 0.5
+        });
+        this.headlightMesh = new THREE.Mesh(headlightGeometry, headlightMaterial);
+        this.headlightMesh.position.set(0, this.data.height * 0.6, this.data.wheelbase / 2 + 0.05);
+        this.mesh.add(this.headlightMesh);
+
+        // Luz spot do farol
+        const spotLight = new THREE.SpotLight(0xffffcc, 0.5, 15, Math.PI / 6, 0.5, 1);
+        spotLight.position.set(0, this.data.height * 0.6, this.data.wheelbase / 2 + 0.05);
+        spotLight.target.position.set(0, 0, this.data.wheelbase / 2 + 5);
+        this.mesh.add(spotLight);
+        this.mesh.add(spotLight.target);
+
+        // === MATRÍCULA (detalhe traseiro) ===
+        const plateGeometry = new THREE.BoxGeometry(0.15, 0.08, 0.02);
+        const plateMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff });
+        const plateMesh = new THREE.Mesh(plateGeometry, plateMaterial);
+        plateMesh.position.set(0, 0.4, -this.data.wheelbase / 2 - 0.05);
+        this.mesh.add(plateMesh);
+
+        // Posição inicial do grupo
+        this.mesh.position.set(0, 0, 0);
         
         this.scene.add(this.mesh);
     }
 
     /**
-     * Criar corpo físico simples
-     * Nota: Física completa de mota (duas rodas, suspensão) será implementada na FASE 1
+     * Criar sistema de física
      */
-    createPhysics() {
-        const startPos = { x: 0, y: 1, z: 0 };
+    createPhysics(startPosition) {
+        this.physicsComponent = new MotorcyclePhysics(
+            this.physicsWorld,
+            startPosition,
+            this.data
+        );
+    }
 
-        // Corpo dinâmico simples (será substituído por física de veículo na FASE 1)
-        const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
-            .setTranslation(startPos.x, startPos.y, startPos.z)
-            .setLinDamping(0.3)
-            .setAngDamping(0.5);
-
-        this.body = this.physicsWorld.createRigidBody(bodyDesc);
-
-        // Collider principal (caixa simples)
-        const mainCollider = RAPIER.ColliderDesc.cuboid(0.4, 0.3, 0.75)
-            .setTranslation(0, 0.6, 0);
-        this.physicsWorld.createCollider(mainCollider, this.body);
-        this.colliders.push(mainCollider);
-
-        // Colliders das rodas (para colisão básica)
-        const wheelColliderFront = RAPIER.ColliderDesc.cuboid(0.3, 0.3, 0.075)
-            .setTranslation(0, 0.3, 0.9);
-        this.physicsWorld.createCollider(wheelColliderFront, this.body);
-
-        const wheelColliderRear = RAPIER.ColliderDesc.cuboid(0.3, 0.3, 0.075)
-            .setTranslation(0, 0.3, -0.9);
-        this.physicsWorld.createCollider(wheelColliderRear, this.body);
+    /**
+     * Criar sistema de controlo
+     */
+    createController() {
+        this.controllerComponent = new MotorcycleController(this.input);
     }
 
     /**
      * Atualizar a mota
      * @param {number} delta - Delta time
-     * @param {Input} input - Sistema de input
      */
-    update(delta, input) {
-        if (!this.body || !this.mesh) return;
+    update(delta) {
+        if (!this.physicsComponent) return;
 
-        // Controlo básico de movimento (será substituído pela física completa na FASE 1)
-        this.handleInput(input, delta);
+        // Processar respawn após crash
+        if (this.state === 'CRASHED' || this.state === 'RESPAWNING') {
+            this.updateRespawn(delta);
+            return;
+        }
+
+        // Processar inputs
+        const inputs = this.controllerComponent.processInputs(delta);
+        
+        // Verificar pedido de respawn manual
+        if (this.controllerComponent.wantsRespawn()) {
+            this.requestRespawn();
+            return;
+        }
+
+        // Aplicar inputs à física
+        this.physicsComponent.setInputs(
+            inputs.throttle,
+            inputs.steer,
+            inputs.brake,
+            inputs.handbrake
+        );
+
+        // Atualizar física
+        this.physicsComponent.update(delta);
+
+        // Atualizar estado
+        this.updateState();
 
         // Sincronizar visual com física
         this.syncVisualWithPhysics();
 
-        // Atualizar componentes
-        if (this.physicsComponent) {
-            this.physicsComponent.update(delta, input);
-        }
-        if (this.controllerComponent) {
-            this.controllerComponent.update(delta, input);
+        // Atualizar rotação das rodas baseado na velocidade
+        this.updateWheelRotation();
+
+        // Atualizar inclinação do guiador
+        this.updateHandlebarRotation(inputs.steer);
+    }
+
+    /**
+     * Atualizar estado da mota
+     */
+    updateState() {
+        const wasAirborne = this.state === 'AIRBORNE';
+        
+        if (this.physicsComponent.isCrashed) {
+            this.state = 'CRASHED';
+            this.lastCrashTime = Date.now();
+            events.emit('motorcycle.crashed', { motorcycle: this });
+        } else if (this.physicsComponent.isAirborne) {
+            this.state = 'AIRBORNE';
+            if (wasAirborne !== this.physicsComponent.isAirborne) {
+                events.emit('motorcycle.airborne', { motorcycle: this });
+            }
+        } else {
+            this.state = 'NORMAL';
         }
     }
 
     /**
-     * Processar input do jogador
-     * @param {Input} input 
-     * @param {number} delta 
+     * Atualizar lógica de respawn
      */
-    handleInput(input, delta) {
-        if (!this.body) return;
-
-        // Aceleração básica (implementação temporária até FASE 1)
-        if (input.isActionPressed('accelerate')) {
-            // Aplicar força para frente (eixo Z negativo no Three.js)
-            const forward = new THREE.Vector3(0, 0, -1);
-            forward.applyQuaternion(this.mesh.quaternion);
-            
-            this.body.applyImpulse({
-                x: forward.x * this.acceleration * delta,
-                y: 0,
-                z: forward.z * this.acceleration * delta
-            }, true);
+    updateRespawn(delta) {
+        const now = Date.now();
+        
+        if (this.state === 'CRASHED') {
+            // Aguardar delay antes de permitir respawn
+            if (now - this.lastCrashTime >= this.data.respawnDelay) {
+                this.state = 'RESPAWNING';
+                this.executeRespawn();
+            }
         }
+    }
 
-        // Travagem
-        if (input.isActionPressed('brake')) {
-            const forward = new THREE.Vector3(0, 0, -1);
-            forward.applyQuaternion(this.mesh.quaternion);
-            
-            this.body.applyImpulse({
-                x: forward.x * -this.brakeForce * delta,
-                y: 0,
-                z: forward.z * -this.brakeForce * delta
-            }, true);
-        }
+    /**
+     * Executar respawn
+     */
+    executeRespawn() {
+        const position = this.physicsComponent.getPosition();
+        const rotation = this.physicsComponent.getRotation();
+        
+        // Encontrar posição segura (simples: acima do chão)
+        const safePosition = new THREE.Vector3(
+            position.x,
+            2,
+            position.z
+        );
+        const safeRotation = new THREE.Quaternion(0, 0, 0, 1);
+        
+        this.physicsComponent.respawn(safePosition, safeRotation);
+        this.controllerComponent.resetSmoothState();
+        
+        this.state = 'NORMAL';
+        events.emit('motorcycle.respawned', { motorcycle: this });
+    }
 
-        // Direção
-        if (input.isActionPressed('left')) {
-            this.body.setAngvel({ x: 0, y: this.turnSpeed * delta, z: 0 }, true);
-        } else if (input.isActionPressed('right')) {
-            this.body.setAngvel({ x: 0, y: -this.turnSpeed * delta, z: 0 }, true);
-        }
-
-        // Travão de mão
-        if (input.isActionPressed('handbrake')) {
-            this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
-            this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    /**
+     * Pedir respawn manual (tecla R)
+     */
+    requestRespawn() {
+        if (this.state !== 'CRASHED' && this.state !== 'RESPAWNING') {
+            this.lastCrashTime = Date.now();
+            this.state = 'RESPAWNING';
+            this.executeRespawn();
         }
     }
 
@@ -217,107 +410,123 @@ export class Motorcycle {
      * Sincronizar visual com física
      */
     syncVisualWithPhysics() {
-        if (!this.body || !this.mesh) return;
+        if (!this.physicsComponent || !this.mesh) return;
 
-        const position = this.body.translation();
-        const rotation = this.body.rotation();
+        const position = this.physicsComponent.getPosition();
+        const rotation = this.physicsComponent.getRotation();
 
-        this.mesh.position.set(position.x, position.y, position.z);
-        this.mesh.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
+        this.mesh.position.copy(position);
+        this.mesh.quaternion.copy(rotation);
+
+        // Aplicar inclinação visual adicional
+        if (this.physicsComponent.currentLean !== 0 && !this.physicsComponent.isAirborne) {
+            this.mesh.rotateZ(this.physicsComponent.currentLean * 0.5);
+        }
     }
 
     /**
-     * Sincronizar objetos físicos (chamado pelo Game após physics step)
+     * Atualizar rotação das rodas baseado no movimento
      */
-    syncPhysicsObjects() {
-        this.syncVisualWithPhysics();
+    updateWheelRotation() {
+        if (!this.physicsComponent) return;
+
+        const speed = this.physicsComponent.getForwardVelocity();
+        const wheelCircumference = 2 * Math.PI * this.data.wheelRadius;
+        const rotationSpeed = speed / wheelCircumference * Math.PI * 2;
+
+        // Roda dianteira
+        if (this.frontWheel) {
+            this.frontWheel.rotation.x += rotationSpeed * 0.016; // Aproximadamente 60fps
+        }
+
+        // Roda traseira
+        if (this.rearWheel) {
+            this.rearWheel.rotation.x += rotationSpeed * 0.016;
+        }
     }
 
     /**
-     * Resetar/respawn a mota
+     * Atualizar rotação do guiador baseado no input de direção
      */
-    reset() {
-        if (!this.body) return;
+    updateHandlebarRotation(steerInput) {
+        if (!this.handlebarMesh) return;
 
-        this.body.setTranslation({ x: 0, y: 1, z: 0 }, true);
-        this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
-        this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
-        this.body.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
+        const maxSteerAngle = this.data.steering * 0.5;
+        const targetRotation = steerInput * maxSteerAngle;
 
-        this.speed = 0;
+        // Suavizar rotação
+        this.handlebarMesh.rotation.y = MathUtils.lerp(
+            this.handlebarMesh.rotation.y,
+            targetRotation,
+            this.data.steeringSpeed * 0.016
+        );
 
-        console.log('Motorcycle: Reset');
-        events.emit('motorcycle.respawned');
+        // Garfos dianteiros também viram ligeiramente
+        if (this.forkFront) {
+            this.forkFront.rotation.y = targetRotation * 0.3;
+        }
+    }
+
+    /**
+     * Obter velocidade atual em m/s
+     */
+    getSpeed() {
+        return this.physicsComponent ? this.physicsComponent.getSpeed() : 0;
     }
 
     /**
      * Obter posição atual
-     * @returns {THREE.Vector3}
      */
     getPosition() {
-        if (this.body) {
-            const pos = this.body.translation();
-            return new THREE.Vector3(pos.x, pos.y, pos.z);
-        }
-        return this.mesh?.position.clone() || new THREE.Vector3();
+        return this.physicsComponent ? this.physicsComponent.getPosition() : new THREE.Vector3();
     }
 
     /**
-     * Obter velocidade atual
-     * @returns {number}
+     * Obter rotação atual
      */
-    getSpeed() {
-        if (this.body) {
-            const linvel = this.body.linvel();
-            return Math.sqrt(linvel.x ** 2 + linvel.z ** 2);
-        }
-        return this.speed;
+    getRotation() {
+        return this.physicsComponent ? this.physicsComponent.getRotation() : new THREE.Quaternion();
     }
 
     /**
      * Obter mesh visual
-     * @returns {THREE.Group}
      */
     getMesh() {
         return this.mesh;
     }
 
     /**
-     * Definir componente de física (para FASE 1)
-     * @param {MotorcyclePhysics} physics 
+     * Obter estado atual
      */
-    setPhysicsComponent(physics) {
-        this.physicsComponent = physics;
-    }
-
-    /**
-     * Definir componente de controlo (para FASE 1)
-     * @param {MotorcycleController} controller 
-     */
-    setControllerComponent(controller) {
-        this.controllerComponent = controller;
+    getState() {
+        return this.state;
     }
 
     /**
      * Limpar recursos
      */
     dispose() {
+        if (this.physicsComponent) {
+            this.physicsComponent.destroy();
+            this.physicsComponent = null;
+        }
+
         if (this.mesh) {
-            // Dispor geometrias e materiais
             this.mesh.traverse((child) => {
                 if (child.isMesh) {
                     child.geometry?.dispose();
-                    child.material?.dispose();
+                    if (Array.isArray(child.material)) {
+                        child.material.forEach(m => m.dispose());
+                    } else {
+                        child.material?.dispose();
+                    }
                 }
             });
             this.scene.remove(this.mesh);
+            this.mesh = null;
         }
 
-        if (this.body) {
-            this.physicsWorld.removeRigidBody(this.body);
-        }
-
-        this.colliders = [];
+        this.controllerComponent = null;
     }
 }
 

@@ -39,12 +39,12 @@ export const Constants = {
     // Inputs
     Input: {
         ACCELERATE: ['KeyW', 'ArrowUp'],
-        BRAKE: ['KeyS', 'ArrowDown'],
-        LEFT: ['KeyA', 'ArrowLeft'],
-        RIGHT: ['KeyD', 'ArrowRight'],
+        BRAKE_REVERSE: ['KeyS', 'ArrowDown'],
+        TURN_LEFT: ['KeyA', 'ArrowLeft'],
+        TURN_RIGHT: ['KeyD', 'ArrowRight'],
         HANDBRAKE: ['Space'],
         INTERACT: ['KeyE'],
-        RESET: ['KeyR']
+        RESPAWN: ['KeyR']
     },
 
     // Mundo
