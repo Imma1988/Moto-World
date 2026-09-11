@@ -13,9 +13,11 @@
             user-select: none;
         }
         #game-container {
-            width: 100vw;
-            height: 100vh;
-            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
         }
         #loading-screen {
             position: absolute;
@@ -30,14 +32,14 @@
             align-items: center;
             color: white;
             z-index: 9999;
-            transition: opacity 0.5s ease-out;
+            transition: opacity 0.5s ease;
         }
-        .loader {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #e94560;
-            border-radius: 50%;
+        .spinner {
             width: 50px;
             height: 50px;
+            border: 5px solid rgba(255,255,255,0.3);
+            border-top: 5px solid #fff;
+            border-radius: 50%;
             animation: spin 1s linear infinite;
             margin-bottom: 20px;
         }
@@ -48,95 +50,74 @@
         #hud {
             position: absolute;
             top: 20px;
-            left: 20px;
-            color: white;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            color: #00ffcc;
+            font-family: monospace;
             font-size: 18px;
-            text-shadow: 1px 1px 2px black;
             pointer-events: none;
-            display: none; /* Só aparece depois de carregar */
+            display: none;
+            border: 1px solid #333;
+            min-width: 150px;
         }
-        .hud-item {
+        .hud-label {
+            color: #aaa;
+            font-size: 12px;
+            text-transform: uppercase;
             margin-bottom: 5px;
-            background: rgba(0, 0, 0, 0.5);
-            padding: 5px 10px;
-            border-radius: 4px;
-            display: inline-block;
+        }
+        .hud-value {
+            font-size: 24px;
+            font-weight: bold;
         }
         #controls-hint {
             position: absolute;
             bottom: 20px;
-            right: 20px;
-            color: rgba(255, 255, 255, 0.7);
-            font-size: 14px;
-            text-align: right;
+            left: 20px;
+            color: rgba(255,255,255,0.6);
+            font-size: 12px;
             pointer-events: none;
-            text-shadow: 1px 1px 2px black;
+            line-height: 1.6;
         }
     </style>
     
-    <!-- Import Map Corrigido para Versão 0.14.0 -->
+    <!-- IMPORT MAP: Deve vir ANTES de qualquer script que use imports -->
     <script type="importmap">
     {
         "imports": {
-            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
-            "rapier3d-compat": "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.14.0/rapier3d-compat.module.js"
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+            "@dimforge/rapier3d-compat": "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.14.0/rapier3d-compat.module.js"
         }
     }
     </script>
 </head>
 <body>
+
     <div id="loading-screen">
-        <div class="loader"></div>
-        <h2>A carregar Motor de Física...</h2>
-        <p id="loading-status">A inicializar Rapier...</p>
-    </div>
-
-    <div id="hud">
-        <div class="hud-item">Velocidade: <span id="speed-value">0</span> km/h</div>
-        <div class="hud-item">Estado: <span id="state-value">NORMAL</span></div>
-    </div>
-
-    <div id="controls-hint">
-        W/A/S/D = Conduzir<br>
-        ESPAÇO = Travão<br>
-        R = Resetar Mota
+        <div class="spinner"></div>
+        <h2 id="loading-text">A carregar motor físico...</h2>
+        <p style="font-size: 12px; opacity: 0.7; margin-top: 10px;">Motorcycle Sandbox v1.0</p>
     </div>
 
     <div id="game-container"></div>
 
-    <script type="module">
-        import { Game } from './src/core/Game.js';
+    <div id="hud">
+        <div class="hud-label">Velocidade</div>
+        <div class="hud-value"><span id="speed-value">0</span> <span style="font-size:14px">km/h</span></div>
+        <div style="margin-top: 10px;" class="hud-label">Estado</div>
+        <div id="state-value" style="color: #00ffcc;">Normal</div>
+    </div>
 
-        // Iniciar o jogo apenas quando o DOM estiver pronto
-        window.addEventListener('DOMContentLoaded', () => {
-            const loadingScreen = document.getElementById('loading-screen');
-            const loadingStatus = document.getElementById('loading-status');
-            const hud = document.getElementById('hud');
+    <div id="controls-hint">
+        WASD / Setas: Conduzir<br>
+        ESPAÇO: Travão de mão<br>
+        R: Resetar Mota
+    </div>
 
-            loadingStatus.textContent = "A carregar Three.js e Física...";
-
-            // Pequeno delay para garantir que os recursos visuais carregam
-            setTimeout(async () => {
-                try {
-                    const game = new Game();
-                    await game.init();
-                    
-                    // Esconder loading, mostrar HUD
-                    loadingScreen.style.opacity = '0';
-                    setTimeout(() => {
-                        loadingScreen.style.display = 'none';
-                        hud.style.display = 'block';
-                    }, 500);
-
-                    game.start();
-                } catch (error) {
-                    console.error("Erro fatal ao iniciar o jogo:", error);
-                    loadingStatus.textContent = "ERRO: " + error.message;
-                    loadingStatus.style.color = "#ff4444";
-                }
-            }, 100);
-        });
-    </script>
+    <!-- O script do jogo deve vir DEPOIS do importmap -->
+    <script type="module" src="src/main.js"></script>
 </body>
 </html>
