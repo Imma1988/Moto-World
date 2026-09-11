@@ -4,58 +4,139 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Motorcycle Sandbox - Fase 1</title>
-    <link rel="stylesheet" href="style.css">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            user-select: none;
+        }
+        #game-container {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+        #loading-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            z-index: 9999;
+            transition: opacity 0.5s ease-out;
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #e94560;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        #hud {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 18px;
+            text-shadow: 1px 1px 2px black;
+            pointer-events: none;
+            display: none; /* Só aparece depois de carregar */
+        }
+        .hud-item {
+            margin-bottom: 5px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            border-radius: 4px;
+            display: inline-block;
+        }
+        #controls-hint {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 14px;
+            text-align: right;
+            pointer-events: none;
+            text-shadow: 1px 1px 2px black;
+        }
+    </style>
     
-    <!-- Import Map para resolver dependências sem bundler -->
+    <!-- Import Map Corrigido para Versão 0.14.0 -->
     <script type="importmap">
     {
         "imports": {
             "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
             "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
-            "@dimforge/rapier3d-compat": "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.11.2/rapier3d-compat.module.js"
+            "rapier3d-compat": "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.14.0/rapier3d-compat.module.js"
         }
     }
     </script>
-    
-    <style>
-        body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; }
-        canvas { display: block; }
-        #loading {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background: #1a1a1a; color: #fff; display: flex; flex-direction: column;
-            justify-content: center; align-items: center; z-index: 9999;
-            transition: opacity 0.5s ease;
-        }
-        #loading.hidden { opacity: 0; pointer-events: none; }
-        .spinner {
-            width: 40px; height: 40px; border: 4px solid #333;
-            border-top: 4px solid #ff9800; border-radius: 50%;
-            animation: spin 1s linear infinite; margin-bottom: 15px;
-        }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        #hud {
-            position: absolute; top: 10px; left: 10px; color: #fff;
-            font-size: 14px; text-shadow: 1px 1px 2px #000; pointer-events: none;
-            display: none;
-        }
-    </style>
 </head>
 <body>
-
-    <!-- Ecrã de Carregamento -->
-    <div id="loading">
-        <div class="spinner"></div>
-        <div id="loading-text">A carregar motor de física...</div>
+    <div id="loading-screen">
+        <div class="loader"></div>
+        <h2>A carregar Motor de Física...</h2>
+        <p id="loading-status">A inicializar Rapier...</p>
     </div>
 
-    <!-- HUD Básico -->
     <div id="hud">
-        <div>Velocidade: <span id="speed-value">0</span> km/h</div>
-        <div>Estado: <span id="state-value">Normal</span></div>
-        <div style="margin-top:5px; font-size: 12px; color: #aaa;">WASD: Conduzir | R: Reset | Espaço: Travão</div>
+        <div class="hud-item">Velocidade: <span id="speed-value">0</span> km/h</div>
+        <div class="hud-item">Estado: <span id="state-value">NORMAL</span></div>
     </div>
 
-    <!-- Ponto de entrada da aplicação -->
-    <script type="module" src="src/main.js"></script>
+    <div id="controls-hint">
+        W/A/S/D = Conduzir<br>
+        ESPAÇO = Travão<br>
+        R = Resetar Mota
+    </div>
+
+    <div id="game-container"></div>
+
+    <script type="module">
+        import { Game } from './src/core/Game.js';
+
+        // Iniciar o jogo apenas quando o DOM estiver pronto
+        window.addEventListener('DOMContentLoaded', () => {
+            const loadingScreen = document.getElementById('loading-screen');
+            const loadingStatus = document.getElementById('loading-status');
+            const hud = document.getElementById('hud');
+
+            loadingStatus.textContent = "A carregar Three.js e Física...";
+
+            // Pequeno delay para garantir que os recursos visuais carregam
+            setTimeout(async () => {
+                try {
+                    const game = new Game();
+                    await game.init();
+                    
+                    // Esconder loading, mostrar HUD
+                    loadingScreen.style.opacity = '0';
+                    setTimeout(() => {
+                        loadingScreen.style.display = 'none';
+                        hud.style.display = 'block';
+                    }, 500);
+
+                    game.start();
+                } catch (error) {
+                    console.error("Erro fatal ao iniciar o jogo:", error);
+                    loadingStatus.textContent = "ERRO: " + error.message;
+                    loadingStatus.style.color = "#ff4444";
+                }
+            }, 100);
+        });
+    </script>
 </body>
 </html>
