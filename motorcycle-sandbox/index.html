@@ -5,119 +5,88 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Motorcycle Sandbox - Fase 1</title>
     <style>
-        body {
-            margin: 0;
-            overflow: hidden;
-            background-color: #000;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            user-select: none;
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        #game-container { width: 100vw; height: 100vh; display: block; }
+        #loading {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: #1a1a1a; color: #fff; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 9999;
+            transition: opacity 0.5s;
         }
-        #game-container {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-        }
-        #loading-screen {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            color: white;
-            z-index: 9999;
-            transition: opacity 0.5s ease;
-        }
+        #loading.hidden { opacity: 0; pointer-events: none; }
         .spinner {
-            width: 50px;
-            height: 50px;
-            border: 5px solid rgba(255,255,255,0.3);
-            border-top: 5px solid #fff;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin-bottom: 20px;
+            width: 40px; height: 40px; border: 4px solid #333;
+            border-top: 4px solid #fff; border-radius: 50%;
+            animation: spin 1s linear infinite; margin-bottom: 20px;
         }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         #hud {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 15px;
-            border-radius: 8px;
-            color: #00ffcc;
-            font-family: monospace;
-            font-size: 18px;
-            pointer-events: none;
+            position: absolute; top: 20px; left: 20px; color: #fff;
+            font-size: 18px; text-shadow: 1px 1px 2px #000; pointer-events: none;
             display: none;
-            border: 1px solid #333;
-            min-width: 150px;
         }
-        .hud-label {
-            color: #aaa;
-            font-size: 12px;
-            text-transform: uppercase;
-            margin-bottom: 5px;
-        }
-        .hud-value {
-            font-size: 24px;
-            font-weight: bold;
-        }
+        .hud-item { margin-bottom: 5px; }
         #controls-hint {
-            position: absolute;
-            bottom: 20px;
-            left: 20px;
-            color: rgba(255,255,255,0.6);
-            font-size: 12px;
-            pointer-events: none;
-            line-height: 1.6;
+            position: absolute; bottom: 20px; left: 20px; color: rgba(255,255,255,0.7);
+            font-size: 14px; pointer-events: none;
         }
     </style>
     
-    <!-- IMPORT MAP: Deve vir ANTES de qualquer script que use imports -->
+    <!-- Import Map Corrigido -->
     <script type="importmap">
     {
         "imports": {
-            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
-            "@dimforge/rapier3d-compat": "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.14.0/rapier3d-compat.module.js"
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+            "rapier3d": "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d@0.14.0/esm/rapier3d.js"
         }
     }
     </script>
 </head>
 <body>
-
-    <div id="loading-screen">
+    <div id="loading">
         <div class="spinner"></div>
-        <h2 id="loading-text">A carregar motor físico...</h2>
-        <p style="font-size: 12px; opacity: 0.7; margin-top: 10px;">Motorcycle Sandbox v1.0</p>
+        <div id="loading-text">A carregar motor de física...</div>
+    </div>
+
+    <div id="hud">
+        <div class="hud-item">Velocidade: <span id="speed-value">0</span> km/h</div>
+        <div class="hud-item">Estado: <span id="state-value">Normal</span></div>
+    </div>
+
+    <div id="controls-hint">
+        W/S: Acelerar/Travar | A/D: Virar | ESPAÇO: Travão Mão | R: Reset
     </div>
 
     <div id="game-container"></div>
 
-    <div id="hud">
-        <div class="hud-label">Velocidade</div>
-        <div class="hud-value"><span id="speed-value">0</span> <span style="font-size:14px">km/h</span></div>
-        <div style="margin-top: 10px;" class="hud-label">Estado</div>
-        <div id="state-value" style="color: #00ffcc;">Normal</div>
-    </div>
+    <script type="module">
+        import * as THREE from 'three';
+        import RAPIER from 'rapier3d';
 
-    <div id="controls-hint">
-        WASD / Setas: Conduzir<br>
-        ESPAÇO: Travão de mão<br>
-        R: Resetar Mota
-    </div>
+        // Inicialização assíncrona do Rapier
+        async function init() {
+            await RAPIER.init();
+            
+            // Expor RAPIER globalmente para outros módulos usarem antes do bundle completo
+            window.RAPIER = RAPIER;
+            
+            // Agora importa o jogo principal
+            const { Game } = await import('./src/core/Game.js');
+            const game = new Game();
+            game.start();
+            
+            // Esconder loading
+            setTimeout(() => {
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('hud').style.display = 'block';
+            }, 500);
+        }
 
-    <!-- O script do jogo deve vir DEPOIS do importmap -->
-    <script type="module" src="src/main.js"></script>
+        init().catch(err => {
+            console.error("Erro fatal:", err);
+            document.getElementById('loading-text').innerText = "Erro ao carregar: " + err.message;
+        });
+    </script>
 </body>
 </html>
