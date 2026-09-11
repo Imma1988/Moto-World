@@ -26,15 +26,13 @@ export const Constants = {
         lookAheadDistance: 3.0, // quanto a câmara "olha à frente" à velocidade de referência
     },
 
+    // O tamanho do mapa, waypoints de estradas e ponto de spawn vivem em
+    // world/MapLayout.js (dados de conteúdo do mundo, não afinações do
+    // motor de jogo) — para evitar duas fontes de verdade.
     WORLD: {
-        groundSize: 200,
         skyColor: 0x8fd3f4,
-        fogNear: 60,
-        fogFar: 220,
-        // Ponto seguro usado no início do jogo e em respawns. O World é
-        // quem expõe este valor (getSpawnPoint()) — outros sistemas nunca
-        // devem ler Constants.WORLD.safeSpawn directamente.
-        safeSpawn: { x: 0, y: 0.5, z: 0, heading: 0 },
+        fogNear: 90,
+        fogFar: 300,
     },
 
     PHYSICS: {

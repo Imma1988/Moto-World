@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { clamp, lerp } from '../utils/MathUtils.js';
-import { SurfaceType } from '../world/World.js';
+import { SurfaceType } from '../world/SurfaceType.js';
 
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 

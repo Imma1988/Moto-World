@@ -62,7 +62,7 @@ export class Game {
         this.player = new Player(this.scene);
         this.player.enterMotorcycle(this.motorcycle);
 
-        this.thirdPersonCamera = new ThirdPersonCamera(this.camera, Constants.CAMERA);
+        this.thirdPersonCamera = new ThirdPersonCamera(this.camera, this.physicsWorld, Constants.CAMERA);
         this.hud = new HUD(document.getElementById('hud'));
 
         window.addEventListener('resize', this.handleResize);

@@ -1,6 +1,9 @@
 import * as THREE from 'three';
+import RAPIER from '@dimforge/rapier3d-compat';
 import { Constants } from '../core/Constants.js';
 import { clamp, lerp, dampFactor } from '../utils/MathUtils.js';
+
+const CAMERA_COLLISION_MARGIN = 0.4;
 
 // Câmara em terceira pessoa que segue um alvo (mesh) mantendo distância e
 // altura configuráveis, com suavização independente do framerate.
@@ -11,9 +14,14 @@ import { clamp, lerp, dampFactor } from '../utils/MathUtils.js';
 // mira reagem à velocidade estimada do alvo (look-ahead + distância
 // dinâmica), dando uma ligeira sensação de peso sem efeitos
 // cinematográficos.
+//
+// Se receber physicsWorld, evita atravessar terreno/edifícios: lança um
+// raio do ponto de mira até à posição desejada da câmara e aproxima-a se
+// encontrar algo pelo caminho.
 export class ThirdPersonCamera {
-    constructor(camera, config = Constants.CAMERA) {
+    constructor(camera, physicsWorld, config = Constants.CAMERA) {
         this.camera = camera;
+        this.physicsWorld = physicsWorld;
         this.config = config;
 
         this.currentPosition = new THREE.Vector3();
@@ -44,17 +52,43 @@ export class ThirdPersonCamera {
         const lookAhead = forwardHoriz.clone().multiplyScalar(speedRatio * this.config.lookAheadDistance);
         const desiredLookAt = target.position.clone().add(lookAhead).add(new THREE.Vector3(0, lookAtHeight, 0));
 
+        const unobstructedPosition = this.avoidObstructions(desiredLookAt, desiredPosition);
+
         if (!this.hasInitialized) {
-            this.currentPosition.copy(desiredPosition);
+            this.currentPosition.copy(unobstructedPosition);
             this.currentLookAt.copy(desiredLookAt);
             this.hasInitialized = true;
         } else {
-            this.currentPosition.lerp(desiredPosition, dampFactor(positionSmoothing, dt));
+            this.currentPosition.lerp(unobstructedPosition, dampFactor(positionSmoothing, dt));
             this.currentLookAt.lerp(desiredLookAt, dampFactor(lookAtSmoothing, dt));
         }
 
         this.camera.position.copy(this.currentPosition);
         this.camera.lookAt(this.currentLookAt);
+    }
+
+    // Lança um raio do ponto de mira até à posição desejada da câmara; se
+    // encontrar algo pelo caminho (terreno, edifício), devolve um ponto
+    // um pouco antes do impacto em vez da posição desejada.
+    avoidObstructions(lookAtPoint, desiredPosition) {
+        if (!this.physicsWorld) return desiredPosition;
+
+        const direction = desiredPosition.clone().sub(lookAtPoint);
+        const distance = direction.length();
+        if (distance < 1e-4) return desiredPosition;
+        direction.normalize();
+
+        const ray = new RAPIER.Ray(
+            { x: lookAtPoint.x, y: lookAtPoint.y, z: lookAtPoint.z },
+            { x: direction.x, y: direction.y, z: direction.z }
+        );
+        const hit = this.physicsWorld.castRay(ray, distance, true);
+        if (!hit) return desiredPosition;
+
+        const toi = hit.timeOfImpact ?? hit.toi ?? distance;
+        const safeDistance = Math.max(0, toi - CAMERA_COLLISION_MARGIN);
+
+        return lookAtPoint.clone().addScaledVector(direction, safeDistance);
     }
 
     // Estima a velocidade horizontal do alvo por diferenças de posição

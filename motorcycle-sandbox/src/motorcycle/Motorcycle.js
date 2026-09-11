@@ -139,6 +139,11 @@ export class Motorcycle {
             return;
         }
 
+        if (this.world.isOutOfBounds(this.physics.getPosition())) {
+            this.respawn();
+            return;
+        }
+
         if (this.state === MotorcycleState.CRASHED) {
             this.crashTimer -= dt;
             if (this.crashTimer <= 0) {
