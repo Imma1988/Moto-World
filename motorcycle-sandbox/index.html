@@ -4,109 +4,58 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Motorcycle Sandbox - Fase 1</title>
-    <style>
-        body {
-            margin: 0;
-            overflow: hidden;
-            background-color: #000;
-            font-family: sans-serif;
-        }
-        #game-container {
-            width: 100vw;
-            height: 100vh;
-            display: block;
-        }
-        #loading-screen {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: #1a1a1a;
-            color: #fff;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            z-index: 9999;
-            transition: opacity 0.5s;
-        }
-        #loading-screen.hidden {
-            opacity: 0;
-            pointer-events: none;
-        }
-        .spinner {
-            width: 40px;
-            height: 40px;
-            border: 4px solid #333;
-            border-top: 4px solid #00ff88;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin-bottom: 20px;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        #hud {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            color: #fff;
-            font-family: monospace;
-            font-size: 18px;
-            text-shadow: 1px 1px 2px #000;
-            pointer-events: none;
-            z-index: 100;
-        }
-        .hud-item {
-            margin-bottom: 5px;
-        }
-        #controls-hint {
-            position: absolute;
-            bottom: 20px;
-            left: 20px;
-            color: rgba(255,255,255,0.7);
-            font-family: monospace;
-            font-size: 14px;
-            pointer-events: none;
-        }
-    </style>
-    <!-- Import Map para Three.js e Rapier -->
+    <link rel="stylesheet" href="style.css">
+    
+    <!-- Import Map para resolver dependências sem bundler -->
     <script type="importmap">
     {
         "imports": {
             "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
             "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
-            "@dimforge/rapier3d-compat": "https://raw.githubusercontent.com/dimforge/rapier/v0.11.2/npm/rapier3d-compat/rapier3d-compat.module.js"
+            "@dimforge/rapier3d-compat": "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.11.2/rapier3d-compat.module.js"
         }
     }
     </script>
+    
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; }
+        canvas { display: block; }
+        #loading {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: #1a1a1a; color: #fff; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 9999;
+            transition: opacity 0.5s ease;
+        }
+        #loading.hidden { opacity: 0; pointer-events: none; }
+        .spinner {
+            width: 40px; height: 40px; border: 4px solid #333;
+            border-top: 4px solid #ff9800; border-radius: 50%;
+            animation: spin 1s linear infinite; margin-bottom: 15px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        #hud {
+            position: absolute; top: 10px; left: 10px; color: #fff;
+            font-size: 14px; text-shadow: 1px 1px 2px #000; pointer-events: none;
+            display: none;
+        }
+    </style>
 </head>
 <body>
-    <div id="loading-screen">
+
+    <!-- Ecrã de Carregamento -->
+    <div id="loading">
         <div class="spinner"></div>
         <div id="loading-text">A carregar motor de física...</div>
     </div>
 
+    <!-- HUD Básico -->
     <div id="hud">
-        <div class="hud-item">Velocidade: <span id="speed-value">0</span> km/h</div>
-        <div class="hud-item">Estado: <span id="state-value">NORMAL</span></div>
+        <div>Velocidade: <span id="speed-value">0</span> km/h</div>
+        <div>Estado: <span id="state-value">Normal</span></div>
+        <div style="margin-top:5px; font-size: 12px; color: #aaa;">WASD: Conduzir | R: Reset | Espaço: Travão</div>
     </div>
 
-    <div id="controls-hint">
-        W/A/S/D: Conduzir | ESPAÇO: Travão | R: Reset
-    </div>
-
-    <div id="game-container"></div>
-
-    <script type="module">
-        import * as Game from './src/core/Game.js';
-        
-        // Iniciar o jogo após carregar o DOM
-        window.addEventListener('DOMContentLoaded', () => {
-            Game.init();
-        });
-    </script>
+    <!-- Ponto de entrada da aplicação -->
+    <script type="module" src="src/main.js"></script>
 </body>
 </html>
