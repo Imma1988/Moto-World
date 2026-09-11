@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Motorcycle Sandbox</title>
+    <link rel="stylesheet" href="./style.css" />
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "@dimforge/rapier3d-compat": "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.14.0/+esm"
+        }
+    }
+    </script>
+</head>
+<body>
+    <div id="game-container"></div>
+
+    <div id="loading-screen">
+        <p>A carregar Motorcycle Sandbox...</p>
+    </div>
+
+    <script type="module" src="./src/main.js"></script>
+</body>
+</html>
